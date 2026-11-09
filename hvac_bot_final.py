@@ -7,10 +7,10 @@ import requests
 import xml.etree.ElementTree as ET
 
 # --- CẤU HÌNH THÔNG TIN ---
-TELEGRAM_BOT_TOKEN = "9112810435:AAFutn9YliqCddPo2V1d-EjMVAZWQ_LkA8o"
-TELEGRAM_CHAT_ID = "877586198"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "9112810435:AAFutn9YliqCddPo2V1d-EjMVAZWQ_LkA8o")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AQ.Ab8RN6LBHujRi4lqEHiGFlULjWJiHszEhxIWkn-9PPbNDEgR3g")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "877586198")
 
-# Lọc tin tức thị trường điều hòa / máy lạnh tại Việt Nam
 RSS_URL = "https://news.google.com/rss/search?q=(%22điều+hòa%22+OR+%22máy+lạnh%22)+thị+trường+Việt+Nam+when:3d&hl=vi&gl=VN&ceid=VN:vi"
 SEEN_FILE = "seen_articles.json"
 
@@ -35,19 +35,69 @@ def fetch_rss_news():
     for item in root.findall("./channel/item"):
         title = item.find("title").text if item.find("title") is not None else ""
         link = item.find("link").text if item.find("link") is not None else ""
-        items.append({"title": title, "link": link})
+        desc = item.find("description").text if item.find("description") is not None else ""
+        items.append({"title": title, "link": link, "desc": desc})
     return items
 
-def send_telegram_message(title, link):
+def summarize_with_gemini(title, summary_raw):
+    """Gọi trực tiếp REST API của Gemini hỗ trợ cả API Key lẫn Auth Token"""
+    prompt_text = f"""Bạn là chuyên gia phân tích thị trường điện máy & điều hòa không khí Việt Nam.
+Hãy đọc thông tin sau và tóm tắt ngắn gọn:
+
+Tiêu đề: {title}
+Nội dung ban đầu: {summary_raw}
+
+Yêu cầu định dạng (tối đa 3 dòng, không dùng thẻ html):
+- Trọng tâm: Tóm lược sự kiện (doanh số, chính sách hãng, giá cả, thời tiết...)
+- Hãng/Thương hiệu: Tên hãng hoặc chuỗi liên quan (Daikin, Casper, Panasonic, MediaMart...)
+- Tác động nhanh: Nhận định nhanh ảnh hưởng tới thị trường."""
+
+    payload = {
+        "contents": [{
+            "parts": [{"text": prompt_text}]
+        }]
+    }
+
+    # Phương án 1: Thử gọi qua URL query param thông thường
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    headers = {"Content-Type": "application/json"}
+    
+    try:
+        res = requests.post(url, headers=headers, json=payload, timeout=20)
+        
+        # Phương án 2: Nếu bị chặn do token type, dùng Authorization Header
+        if res.status_code == 401 or res.status_code == 400:
+            auth_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+            auth_headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {GEMINI_API_KEY}"
+            }
+            res = requests.post(auth_url, headers=auth_headers, json=payload, timeout=20)
+
+        if res.status_code == 200:
+            data = res.json()
+            candidates = data.get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if parts:
+                    return parts[0].get("text", "").strip()
+        print(f"Lỗi phản hồi Gemini ({res.status_code}): {res.text}")
+    except Exception as e:
+        print(f"Lỗi kết nối Gemini: {e}")
+
+    return "Xem chi tiết tin tức tại đường link bên dưới."
+
+def send_telegram_message(title, summary, link):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     
-    # Thoát ký tự HTML an toàn
     safe_title = html.escape(title)
+    safe_summary = html.escape(summary)
     
     message_text = (
         f"❄️ <b>BẢN TIN THỊ TRƯỜNG ĐIỀU HÒA VN</b>\n\n"
         f"📰 <b>{safe_title}</b>\n\n"
-        f"🔗 <a href='{link}'>Bấm vào đây để đọc bài viết</a>"
+        f"💡 <b>Tóm tắt AI:</b>\n{safe_summary}\n\n"
+        f"🔗 <a href='{link}'>Đọc toàn bộ bài viết</a>"
     )
     
     payload = {
@@ -75,10 +125,11 @@ def run_job():
         link = item["link"]
         if link in seen:
             continue
-        print(f"-> Xử lý và gửi: {item['title']}")
-        send_telegram_message(item["title"], link)
+        print(f"-> Xử lý: {item['title']}")
+        ai_summary = summarize_with_gemini(item["title"], item["desc"])
+        send_telegram_message(item["title"], ai_summary, link)
         new_seen.append(link)
-        time.sleep(1)
+        time.sleep(2)
 
     save_seen(new_seen)
     print("Hoàn thành chu kỳ quét.")
