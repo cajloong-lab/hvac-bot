@@ -9,7 +9,7 @@ from google import genai
 # --- CẤU HÌNH THÔNG TIN ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "9112810435:AAFutn9YliqCddPo2V1d-EjMVAZWQ_LkA8o")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AQ.Ab8RN6Lds-9Izvd5Nq8wlBe7PkV9Bl7NLmmIt2X_w69kLXtc6A")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "@acmaketwatchbot")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "877586198")
 
 RSS_URL = "https://news.google.com/rss/search?q=điều+hòa+thị+trường+Việt+Nam+when:2d&hl=vi&gl=VN&ceid=VN:vi"
 SEEN_FILE = "seen_articles.json"
